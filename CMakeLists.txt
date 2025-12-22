@@ -124,6 +124,17 @@ elseif(PLATFORM_JETSON OR PLATFORM_LINUX)
     )
 endif()
 
+# Video pipeline sources (Phase 2)
+set(VIDEO_SOURCES
+    src/video/gstreamer_pipeline.cpp
+)
+
+# Rendering sources (Phase 2)
+set(RENDERING_SOURCES
+    src/rendering/glfw_window.cpp
+    src/rendering/texture_renderer.cpp
+)
+
 # Utility sources
 set(UTIL_SOURCES
     # Will add logger, config_parser, etc. later
@@ -133,6 +144,8 @@ set(UTIL_SOURCES
 set(ALL_SOURCES
     ${CORE_SOURCES}
     ${PLATFORM_SOURCES}
+    ${VIDEO_SOURCES}
+    ${RENDERING_SOURCES}
     ${UTIL_SOURCES}
 )
 
