@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 project(RobotVisionDemo
     VERSION 1.0.0
     DESCRIPTION "Cross-platform robot vision application"
-    LANGUAGES CXX
+    LANGUAGES CXX C  # C needed for NanoVG
 )
 
 # ============================================================================
@@ -135,6 +135,16 @@ set(RENDERING_SOURCES
     src/rendering/texture_renderer.cpp
 )
 
+# OSD sources (Phase 3 - NanoVG)
+set(OSD_SOURCES
+    src/osd/osd_renderer.cpp
+)
+
+# NanoVG library (compiled as C)
+set(NANOVG_SOURCES
+    ${CMAKE_SOURCE_DIR}/third_party/nanovg/src/nanovg.c
+)
+
 # Utility sources
 set(UTIL_SOURCES
     # Will add logger, config_parser, etc. later
@@ -146,6 +156,8 @@ set(ALL_SOURCES
     ${PLATFORM_SOURCES}
     ${VIDEO_SOURCES}
     ${RENDERING_SOURCES}
+    ${OSD_SOURCES}
+    ${NANOVG_SOURCES}
     ${UTIL_SOURCES}
 )
 
@@ -158,6 +170,7 @@ add_executable(robot_vision ${ALL_SOURCES})
 target_include_directories(robot_vision PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_SOURCE_DIR}/third_party/nanovg/src  # NanoVG headers
     ${GSTREAMER_INCLUDE_DIRS}
     ${GSTREAMER_APP_INCLUDE_DIRS}
     ${GSTREAMER_VIDEO_INCLUDE_DIRS}
@@ -199,6 +212,14 @@ endif()
 install(TARGETS robot_vision DESTINATION bin)
 
 # ============================================================================
+# Assets Path (for fonts, etc.)
+# ============================================================================
+# Define path to assets directory for runtime loading
+target_compile_definitions(robot_vision PRIVATE
+    ASSETS_PATH="${CMAKE_SOURCE_DIR}/assets"
+)
+
+# ============================================================================
 # Summary
 # ============================================================================
 message(STATUS "")
@@ -208,6 +229,8 @@ message(STATUS "Build type:   ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "GStreamer:    ${GSTREAMER_VERSION}")
 message(STATUS "GLFW:         ${GLFW_VERSION}")
+message(STATUS "NanoVG:       Enabled (Phase 3)")
 message(STATUS "JSON support: ${HAS_JSON}")
+message(STATUS "Assets path:  ${CMAKE_SOURCE_DIR}/assets")
 message(STATUS "===========================")
 message(STATUS "")

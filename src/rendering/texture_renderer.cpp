@@ -4,13 +4,7 @@
  */
 
 #include "texture_renderer.h"
-
-#ifdef PLATFORM_MACOS
-    #define GL_SILENCE_DEPRECATION
-    #include <OpenGL/gl.h>
-#else
-    #include <GL/gl.h>
-#endif
+#include "core/opengl.h"
 
 #include <iostream>
 #include <algorithm>

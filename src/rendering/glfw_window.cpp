@@ -6,12 +6,7 @@
 #include "glfw_window.h"
 
 // OpenGL must be included before GLFW on macOS
-#ifdef PLATFORM_MACOS
-    #define GL_SILENCE_DEPRECATION  // Silence OpenGL deprecation warnings on macOS
-    #include <OpenGL/gl.h>
-#else
-    #include <GL/gl.h>
-#endif
+#include "core/opengl.h"
 
 #include <GLFW/glfw3.h>
 #include <iostream>

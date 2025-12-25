@@ -1,3 +1,6 @@
 [submodule "private"]
 	path = private
 	url = https://github.com/Hydraulicus/DroneDemoPrivate.git
+[submodule "third_party/nanovg"]
+	path = third_party/nanovg
+	url = https://github.com/memononen/nanovg.git
