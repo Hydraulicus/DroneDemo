@@ -4,3 +4,6 @@
 [submodule "third_party/nanovg"]
 	path = third_party/nanovg
 	url = https://github.com/memononen/nanovg.git
+[submodule "third_party/detector-protocol"]
+	path = third_party/detector-protocol
+	url = /Users/olexii/work/CLionProjects/detector-protocol

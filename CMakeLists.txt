@@ -140,6 +140,11 @@ set(OSD_SOURCES
     src/osd/osd_renderer.cpp
 )
 
+# Detection sources (Phase 4 - Object Detection)
+set(DETECTION_SOURCES
+    src/detection/detection_client.cpp
+)
+
 # NanoVG library (compiled as C)
 set(NANOVG_SOURCES
     ${CMAKE_SOURCE_DIR}/third_party/nanovg/src/nanovg.c
@@ -157,6 +162,7 @@ set(ALL_SOURCES
     ${VIDEO_SOURCES}
     ${RENDERING_SOURCES}
     ${OSD_SOURCES}
+    ${DETECTION_SOURCES}
     ${NANOVG_SOURCES}
     ${UTIL_SOURCES}
 )
@@ -171,6 +177,7 @@ target_include_directories(robot_vision PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/third_party
     ${CMAKE_SOURCE_DIR}/third_party/nanovg/src  # NanoVG headers
+    ${CMAKE_SOURCE_DIR}/third_party/detector-protocol/include  # IPC protocol (Phase 4)
     ${GSTREAMER_INCLUDE_DIRS}
     ${GSTREAMER_APP_INCLUDE_DIRS}
     ${GSTREAMER_VIDEO_INCLUDE_DIRS}
@@ -230,6 +237,7 @@ message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "GStreamer:    ${GSTREAMER_VERSION}")
 message(STATUS "GLFW:         ${GLFW_VERSION}")
 message(STATUS "NanoVG:       Enabled (Phase 3)")
+message(STATUS "Detection:    Enabled (Phase 4)")
 message(STATUS "JSON support: ${HAS_JSON}")
 message(STATUS "Assets path:  ${CMAKE_SOURCE_DIR}/assets")
 message(STATUS "===========================")
