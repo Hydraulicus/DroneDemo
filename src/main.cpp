@@ -22,6 +22,7 @@
 #include <chrono>
 #include <string>
 #include <csignal>
+#include <vector>
 
 using namespace robot_vision;
 
@@ -207,6 +208,19 @@ int main() {
     auto last_heartbeat_time = start_time;
     auto last_reconnect_time = start_time;
 
+    // Detection state (Phase 4 Milestone 2)
+    // current_detections: stores latest detections for OSD rendering (Milestone 3)
+    // last_detection_frame_id: correlates results to frames (for future latency tracking)
+    std::vector<detector_protocol::Detection> current_detections;
+    uint64_t last_detection_frame_id = 0;
+    float last_inference_time_ms = 0.0f;
+    (void)last_detection_frame_id;  // Will be used in Milestone 3 for latency calculation
+
+    // Frame throttling: don't overwhelm detector (target ~10 FPS for detection)
+    auto last_frame_sent_time = std::chrono::steady_clock::now();
+    constexpr int DETECTION_TARGET_FPS = 10;
+    constexpr auto DETECTION_FRAME_INTERVAL = std::chrono::milliseconds(1000 / DETECTION_TARGET_FPS);
+
     // Calculate device pixel ratio for Retina displays
     float pixel_ratio = static_cast<float>(window->getFramebufferWidth()) /
                         static_cast<float>(window->getWidth());
@@ -223,14 +237,61 @@ int main() {
             renderer.updateTexture(frame->pixels, frame->width, frame->height);
             frame_count++;
             total_frames++;
+
+            // 4. Send frame to detector (Phase 4 Milestone 2)
+            // Throttle to avoid overwhelming detector - only send at DETECTION_TARGET_FPS
+            if (detector_connected) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_frame_sent_time >= DETECTION_FRAME_INTERVAL) {
+                    if (!detector->sendFrame(frame->pixels.data(), frame->width, frame->height, total_frames)) {
+                        // Frame send failed - connection may be broken
+                        if (!detector->isConnected()) {
+                            std::cout << "WARNING: Lost connection to detector during frame send\n";
+                            detector_connected = false;
+                        }
+                    }
+                    last_frame_sent_time = now;
+                }
+            }
         }
 
-        // 4. Render video texture to window
+        // 5. Receive detection results (non-blocking poll)
+        if (detector_connected) {
+            uint64_t result_frame_id = 0;
+            float inference_time = 0.0f;
+            std::vector<detector_protocol::Detection> new_detections;
+
+            if (detector->receiveDetections(new_detections, result_frame_id, inference_time)) {
+                current_detections = std::move(new_detections);
+                last_detection_frame_id = result_frame_id;
+                last_inference_time_ms = inference_time;
+
+                // Debug: log when detections are received
+                if (!current_detections.empty()) {
+                    std::cout << "Received " << current_detections.size() << " detections (frame "
+                              << result_frame_id << ", " << inference_time << "ms):\n";
+                    for (const auto& det : current_detections) {
+                        std::cout << "  - " << det.label << " " << (det.confidence * 100) << "% at ["
+                                  << det.x << "," << det.y << " " << det.width << "x" << det.height << "]\n";
+                    }
+                }
+            }
+        }
+
+        // 6. Render video texture to window
         renderer.render(window->getFramebufferWidth(), window->getFramebufferHeight());
 
-        // 5. Render OSD overlay
+        // 7. Render OSD overlay
         int fb_width = window->getFramebufferWidth();
         int fb_height = window->getFramebufferHeight();
+
+        // Relative font sizes (percentage of screen height)
+        float label_font_size = static_cast<float>(fb_height) * 0.025f;      // 2.5% for detection labels
+        float status_font_size = static_cast<float>(fb_height) * 0.022f;     // 2.2% for status text
+        float label_padding = static_cast<float>(fb_height) * 0.005f;        // 0.5% padding
+        float box_line_width = static_cast<float>(fb_height) * 0.003f;       // 0.3% line width
+        float label_offset_y = label_font_size * 1.5f;                       // Space above box for label
+        float status_margin = static_cast<float>(fb_height) * 0.03f;         // 3% margin from edge
 
         osd->beginFrame(fb_width, fb_height, pixel_ratio);
 
@@ -241,24 +302,81 @@ int main() {
         osd->drawTimestamp(10.0f, 10.0f);
 
         // Draw frame counter (bottom-left)
-        osd->drawFrameCounter(total_frames, 10.0f, static_cast<float>(fb_height) - 30.0f);
+        osd->drawFrameCounter(total_frames, 10.0f, static_cast<float>(fb_height) - status_margin);
 
-        // Draw detector status (bottom-right)
-        std::string detector_status = detector_connected ? "Detector: ON" : "Detector: OFF";
-        Color status_color = detector_connected ? Color::green() : Color{0.5f, 0.5f, 0.5f, 1.0f};
+        // Draw detection bounding boxes (Phase 4 Milestone 3)
+        for (const auto& det : current_detections) {
+            // Convert normalized coordinates to screen pixels
+            float box_x = det.x * static_cast<float>(fb_width);
+            float box_y = det.y * static_cast<float>(fb_height);
+            float box_w = det.width * static_cast<float>(fb_width);
+            float box_h = det.height * static_cast<float>(fb_height);
+
+            // Color based on confidence (green = high, yellow = medium, red = low)
+            Color box_color;
+            if (det.confidence >= 0.7f) {
+                box_color = Color::green();
+            } else if (det.confidence >= 0.4f) {
+                box_color = Color::yellow();
+            } else {
+                box_color = Color::red();
+            }
+
+            // Draw bounding box
+            osd->drawRectOutline(box_x, box_y, box_w, box_h, box_color, box_line_width);
+
+            // Draw label with confidence
+            std::string label = std::string(det.label) + " " +
+                std::to_string(static_cast<int>(det.confidence * 100)) + "%";
+            osd->drawTextWithBackground(
+                box_x, box_y - label_offset_y,  // Above the box
+                label,
+                Color::white(),
+                Color{box_color.r, box_color.g, box_color.b, 0.7f},  // Semi-transparent bg
+                label_padding,
+                label_font_size
+            );
+        }
+
+        // Draw detector status and detection count (bottom-right)
+        std::string detector_status;
+        Color status_color;
+        if (detector_connected) {
+            detector_status = "Det: " + std::to_string(current_detections.size());
+            status_color = current_detections.empty() ? Color::green() : Color::yellow();
+        } else {
+            detector_status = "Det: OFF";
+            status_color = Color{0.5f, 0.5f, 0.5f, 1.0f};
+        }
+        float status_x = static_cast<float>(fb_width) - status_margin * 4.0f;
+        float status_y = static_cast<float>(fb_height) - status_margin;
         osd->drawTextWithBackground(
-            static_cast<float>(fb_width) - 120.0f,
-            static_cast<float>(fb_height) - 30.0f,
+            status_x,
+            status_y,
             detector_status,
             status_color,
             Color::transparent(0.7f),
-            4.0f,
-            14.0f
+            label_padding,
+            status_font_size
         );
+
+        // Draw inference time if available (above detector status)
+        if (detector_connected && last_inference_time_ms > 0.0f) {
+            std::string inf_text = std::to_string(static_cast<int>(last_inference_time_ms)) + "ms";
+            osd->drawTextWithBackground(
+                status_x,
+                status_y - status_font_size * 1.8f,
+                inf_text,
+                Color::cyan(),
+                Color::transparent(0.7f),
+                label_padding,
+                status_font_size * 0.9f
+            );
+        }
 
         osd->endFrame();
 
-        // 6. Swap buffers
+        // 8. Swap buffers
         window->swapBuffers();
 
         // Update FPS calculation and periodic heartbeat every second

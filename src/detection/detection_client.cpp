@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstring>
 #include <sys/select.h>
+#include <atomic>
 
 namespace robot_vision {
 
@@ -118,30 +119,53 @@ bool DetectionClientImpl::sendHeartbeat() {
         return false;
     }
 
-    // Wait for response with timeout
-    fd_set read_fds;
-    FD_ZERO(&read_fds);
-    FD_SET(socket_fd_, &read_fds);
+    // Wait for response with timeout, handling any interleaved messages
+    for (int attempts = 0; attempts < 5; ++attempts) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(socket_fd_, &read_fds);
 
-    struct timeval timeout;
-    timeout.tv_sec = 1;
-    timeout.tv_usec = 0;
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
 
-    int ready = select(socket_fd_ + 1, &read_fds, nullptr, nullptr, &timeout);
-    if (ready <= 0) {
-        setError("Heartbeat timeout");
-        return false;
+        int ready = select(socket_fd_ + 1, &read_fds, nullptr, nullptr, &timeout);
+        if (ready <= 0) {
+            setError("Heartbeat timeout");
+            return false;
+        }
+
+        // Peek at message type first
+        uint8_t msg_type;
+        ssize_t n = recv(socket_fd_, &msg_type, 1, MSG_PEEK);
+        if (n <= 0) {
+            setError("Connection closed during heartbeat");
+            return false;
+        }
+
+        if (static_cast<MessageType>(msg_type) == MessageType::HEARTBEAT) {
+            // This is our heartbeat response
+            HeartbeatMessage response;
+            n = recv(socket_fd_, &response, sizeof(response), 0);
+            if (n == sizeof(response)) {
+                return true;  // Success!
+            }
+            setError("Incomplete heartbeat response");
+            return false;
+        } else if (static_cast<MessageType>(msg_type) == MessageType::DETECTION_RESULT) {
+            // Got a detection result instead - consume it and continue waiting
+            DetectionResultMessage result;
+            recv(socket_fd_, &result, sizeof(result), 0);
+            // Continue loop to wait for heartbeat response
+        } else {
+            // Unknown message type - try to skip it
+            char discard[256];
+            recv(socket_fd_, discard, sizeof(discard), 0);
+        }
     }
 
-    // Receive response
-    HeartbeatMessage response;
-    ssize_t n = recv(socket_fd_, &response, sizeof(response), 0);
-    if (n != sizeof(response) || response.type != MessageType::HEARTBEAT) {
-        setError("Invalid heartbeat response");
-        return false;
-    }
-
-    return true;
+    setError("Too many non-heartbeat messages");
+    return false;
 }
 
 bool DetectionClientImpl::sendFrame(const uint8_t* pixels, uint32_t width, uint32_t height,
@@ -177,6 +201,10 @@ bool DetectionClientImpl::sendFrame(const uint8_t* pixels, uint32_t width, uint3
     }
 
     std::memcpy(frame_data, pixels, frame_size);
+
+    // Memory barrier: ensure all shared memory writes are visible
+    // before sending the socket notification to the detector
+    std::atomic_thread_fence(std::memory_order_release);
 
     // Send frame ready notification
     FrameReadyMessage msg;
