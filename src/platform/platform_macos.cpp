@@ -8,8 +8,10 @@
 
 #include "core/platform.h"
 #include <sys/utsname.h>  // For uname() to get OS version
+#include <unistd.h>       // For usleep()
 #include <gst/gst.h>      // For camera probing
 #include <iostream>
+#include <vector>
 
 namespace robot_vision {
 
@@ -172,32 +174,68 @@ private:
      *   1 = First external USB camera
      *   2+ = Additional cameras
      *
-     * We probe device-index=1 first (external camera).
-     * If it exists, use it; otherwise fall back to 0 (built-in).
-     *
-     * Probing works by creating a test pipeline and checking if it can
-     * reach PAUSED state (which validates the device exists).
+     * We scan all possible indexes and prefer external cameras (index > 0).
+     * If multiple cameras exist, prefer the highest index (most recently added).
      */
     int getPreferredCameraIndex() const {
-        // Try external camera first (index 1)
-        if (probeCameraExists(1)) {
-            std::cout << "  Camera: Using external USB camera (device-index=1)\n";
-            return 1;
+        std::cout << "  Camera: Scanning available cameras...\n";
+
+        // Scan indexes 0-3 to find all available cameras
+        std::vector<int> available_cameras;
+        for (int i = 0; i <= 3; ++i) {
+            if (probeCameraExists(i)) {
+                std::cout << "    Found camera at device-index=" << i << "\n";
+                available_cameras.push_back(i);
+            }
         }
 
-        // Fall back to built-in camera (index 0)
-        std::cout << "  Camera: Using built-in camera (device-index=0)\n";
-        return 0;
+        if (available_cameras.empty()) {
+            std::cout << "  Camera: No cameras found, defaulting to index 0\n";
+            return 0;
+        }
+
+        // Prefer external camera (highest index > 0) over built-in
+        int selected = available_cameras[0];
+        for (int idx : available_cameras) {
+            if (idx > 0) {
+                selected = idx;  // Prefer external (any index > 0)
+                break;
+            }
+        }
+
+        if (selected > 0) {
+            std::cout << "  Camera: Using external camera (device-index=" << selected << ")\n";
+        } else {
+            std::cout << "  Camera: Using built-in camera (device-index=0)\n";
+        }
+
+        return selected;
     }
 
     /**
      * Probe if a camera at given device-index exists
      *
      * Creates a minimal test pipeline to check if device is available.
-     * Returns true if device exists and can be opened.
+     * Includes retry logic for USB cameras that may need wake-up time.
      */
     bool probeCameraExists(int device_index) const {
-        // Create a minimal test pipeline
+        // Retry up to 2 times (helps with USB cameras in low-power state)
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            if (probeOnce(device_index)) {
+                return true;
+            }
+            // Small delay between retries
+            if (attempt < 1) {
+                usleep(100000);  // 100ms
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Single probe attempt for a camera
+     */
+    bool probeOnce(int device_index) const {
         std::string test_pipeline =
             "avfvideosrc device-index=" + std::to_string(device_index) + " ! fakesink";
 
@@ -216,10 +254,11 @@ private:
         // Try to set pipeline to PAUSED state (validates device exists)
         GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PAUSED);
 
-        // Wait briefly for state change (with timeout)
+        // Wait for state change with longer timeout (3 seconds)
+        // USB cameras may need time to wake from low-power state
         if (ret == GST_STATE_CHANGE_ASYNC) {
             GstState state;
-            ret = gst_element_get_state(pipeline, &state, nullptr, GST_SECOND);  // 1 sec timeout
+            ret = gst_element_get_state(pipeline, &state, nullptr, 3 * GST_SECOND);
         }
 
         bool exists = (ret != GST_STATE_CHANGE_FAILURE);
