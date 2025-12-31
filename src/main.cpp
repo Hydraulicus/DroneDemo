@@ -301,6 +301,21 @@ int main() {
         // Draw timestamp (top-left)
         osd->drawTimestamp(10.0f, 10.0f);
 
+        // Draw model info (top-left, below timestamp) when connected
+        if (detector_connected) {
+            const auto& info = detector->getServerInfo();
+            std::string model_text = info.model_name + " (" + info.getModelTypeString() + ") " + info.getModelSizeString();
+            osd->drawTextWithBackground(
+                10.0f,
+                10.0f + status_font_size * 1.8f,  // Below timestamp
+                model_text,
+                Color::cyan(),
+                Color::transparent(0.6f),
+                label_padding,
+                status_font_size * 0.85f
+            );
+        }
+
         // Draw frame counter (bottom-left)
         osd->drawFrameCounter(total_frames, 10.0f, static_cast<float>(fb_height) - status_margin);
 

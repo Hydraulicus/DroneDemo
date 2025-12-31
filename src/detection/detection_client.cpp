@@ -64,10 +64,11 @@ bool DetectionClientImpl::connect() {
     }
 
     state_ = ConnectionState::Connected;
-    std::cout << "  Connected to detector: " << server_info_.model_name << std::endl;
-    std::cout << "  Model input: " << server_info_.model_input_width << "x"
-              << server_info_.model_input_height << std::endl;
-    std::cout << "  Classes: " << server_info_.num_classes << std::endl;
+    std::cout << "  Connected to detector (Protocol v" << server_info_.protocol_version << ")\n";
+    std::cout << "  Model: " << server_info_.model_name << " (" << server_info_.getModelTypeString() << ")\n";
+    std::cout << "  Input: " << server_info_.model_input_width << "x"
+              << server_info_.model_input_height << ", Classes: " << server_info_.num_classes << "\n";
+    std::cout << "  Size: " << server_info_.getModelSizeString() << ", Device: " << server_info_.device << "\n";
 
     return true;
 }
@@ -315,13 +316,20 @@ bool DetectionClientImpl::performHandshake() {
         return false;
     }
 
-    // Store server info
+    // Store server info (Protocol v2 with ModelInfo)
     server_info_.protocol_version = response.protocol_version;
     server_info_.accepted = response.accepted;
-    server_info_.model_input_width = response.model_input_width;
-    server_info_.model_input_height = response.model_input_height;
-    server_info_.num_classes = response.num_classes;
-    server_info_.model_name = std::string(response.model_name);
+
+    // Extract ModelInfo fields
+    const auto& mi = response.model_info;
+    server_info_.model_name = std::string(mi.name);
+    server_info_.model_description = std::string(mi.description);
+    server_info_.model_type = mi.type;
+    server_info_.model_input_width = mi.input_width;
+    server_info_.model_input_height = mi.input_height;
+    server_info_.num_classes = mi.num_classes;
+    server_info_.model_size_bytes = mi.model_size_bytes;
+    server_info_.device = std::string(mi.device);
 
     return true;
 }

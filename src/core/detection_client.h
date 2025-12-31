@@ -39,15 +39,42 @@ struct DetectionClientConfig {
 };
 
 /**
- * Handshake result from server
+ * Handshake result from server (Protocol v2)
  */
 struct ServerInfo {
     uint32_t protocol_version;
     bool accepted;
+
+    // Model information (from ModelInfo struct)
+    std::string model_name;          // Human-readable name
+    std::string model_description;   // Model description
+    detector_protocol::ModelType model_type;  // Architecture type
     uint32_t model_input_width;
     uint32_t model_input_height;
     uint32_t num_classes;
-    std::string model_name;
+    uint64_t model_size_bytes;       // Model file size
+    std::string device;              // Device info (e.g., "Darwin-arm64")
+
+    // Helper to get model type as string
+    std::string getModelTypeString() const {
+        switch (model_type) {
+            case detector_protocol::ModelType::SSD_MOBILENET: return "SSD-MobileNet";
+            case detector_protocol::ModelType::YOLOV8: return "YOLOv8";
+            case detector_protocol::ModelType::YOLOV5: return "YOLOv5";
+            case detector_protocol::ModelType::EFFICIENTDET: return "EfficientDet";
+            default: return "Unknown";
+        }
+    }
+
+    // Helper to get model size as human-readable string
+    std::string getModelSizeString() const {
+        if (model_size_bytes >= 1024 * 1024) {
+            return std::to_string(model_size_bytes / (1024 * 1024)) + "MB";
+        } else if (model_size_bytes >= 1024) {
+            return std::to_string(model_size_bytes / 1024) + "KB";
+        }
+        return std::to_string(model_size_bytes) + "B";
+    }
 };
 
 /**
