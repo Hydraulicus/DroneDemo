@@ -8,6 +8,8 @@
 
 #include "core/platform.h"
 #include <sys/utsname.h>  // For uname() to get OS version
+#include <gst/gst.h>      // For camera probing
+#include <iostream>
 
 namespace robot_vision {
 
@@ -64,18 +66,20 @@ public:
          * ------------------------------------
          * A pipeline is a chain of elements connected by "!"
          *
-         * autovideosrc    - Automatically finds camera (AVFoundation on macOS)
+         * avfvideosrc     - AVFoundation video source (macOS specific)
+         *   device-index  - 0 = built-in camera, 1+ = external cameras
          * videoconvert    - Converts between video formats
          * video/x-raw,... - "Caps filter" - specifies required format
          * appsink         - Allows our code to receive frames
          *
-         * The caps filter ensures we get RGB format at our desired resolution.
-         * "name=sink" gives us a name to find this element later.
-         * "emit-signals=true" means appsink will emit signals when frames arrive.
-         * "max-buffers=1" and "drop=true" means drop old frames if we're slow.
+         * Camera Selection Strategy:
+         * - Try external camera first (device-index=1)
+         * - Fall back to built-in camera (device-index=0)
          */
+        int camera_index = getPreferredCameraIndex();
+
         std::string pipeline =
-            "autovideosrc ! "
+            "avfvideosrc device-index=" + std::to_string(camera_index) + " ! "
             "videoconvert ! "
             "video/x-raw,format=RGB,width=" + std::to_string(width) +
             ",height=" + std::to_string(height) +
@@ -157,6 +161,75 @@ public:
 
 private:
     std::string os_version_;
+
+    /**
+     * Detect preferred camera index
+     *
+     * TEACHING: Camera Selection Strategy
+     * ------------------------------------
+     * On macOS, device-index maps to AVFoundation devices:
+     *   0 = Built-in FaceTime camera (usually)
+     *   1 = First external USB camera
+     *   2+ = Additional cameras
+     *
+     * We probe device-index=1 first (external camera).
+     * If it exists, use it; otherwise fall back to 0 (built-in).
+     *
+     * Probing works by creating a test pipeline and checking if it can
+     * reach PAUSED state (which validates the device exists).
+     */
+    int getPreferredCameraIndex() const {
+        // Try external camera first (index 1)
+        if (probeCameraExists(1)) {
+            std::cout << "  Camera: Using external USB camera (device-index=1)\n";
+            return 1;
+        }
+
+        // Fall back to built-in camera (index 0)
+        std::cout << "  Camera: Using built-in camera (device-index=0)\n";
+        return 0;
+    }
+
+    /**
+     * Probe if a camera at given device-index exists
+     *
+     * Creates a minimal test pipeline to check if device is available.
+     * Returns true if device exists and can be opened.
+     */
+    bool probeCameraExists(int device_index) const {
+        // Create a minimal test pipeline
+        std::string test_pipeline =
+            "avfvideosrc device-index=" + std::to_string(device_index) + " ! fakesink";
+
+        GError* error = nullptr;
+        GstElement* pipeline = gst_parse_launch(test_pipeline.c_str(), &error);
+
+        if (error) {
+            g_error_free(error);
+            return false;
+        }
+
+        if (!pipeline) {
+            return false;
+        }
+
+        // Try to set pipeline to PAUSED state (validates device exists)
+        GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PAUSED);
+
+        // Wait briefly for state change (with timeout)
+        if (ret == GST_STATE_CHANGE_ASYNC) {
+            GstState state;
+            ret = gst_element_get_state(pipeline, &state, nullptr, GST_SECOND);  // 1 sec timeout
+        }
+
+        bool exists = (ret != GST_STATE_CHANGE_FAILURE);
+
+        // Cleanup
+        gst_element_set_state(pipeline, GST_STATE_NULL);
+        gst_object_unref(pipeline);
+
+        return exists;
+    }
 };
 
 // ============================================================================
